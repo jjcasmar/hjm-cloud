@@ -25,6 +25,8 @@ import asyncio
 import base64
 import json
 import logging
+import socket
+import struct
 import time
 from dataclasses import dataclass, field
 
@@ -60,6 +62,25 @@ ENTITY_KEYS = [
 ENERGY_TICK = 60          # s: integrate + publish while heating
 ENERGY_SAVE_EVERY = 300   # s: persist totals to the store
 ENERGY_MAX_STEP = 600     # s: cap per integration step (clock jumps, suspended host)
+
+
+def abort_connection(ws):
+    """Drop a radiator's connection with a TCP reset instead of a WebSocket close frame.
+
+    Observed: after the server closed sessions cleanly (close frame), radiators did not reconnect
+    until power-cycled, while after a failed/dropped connection they retried within ~15 s. So we
+    never send close frames to radiators; to them this looks like a network glitch.
+    """
+    transport = ws.transport
+    if transport is None:
+        return
+    try:
+        sock = transport.get_extra_info("socket")
+        if sock is not None:  # linger 0 => RST on close
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    except OSError:
+        pass
+    transport.abort()
 
 
 def estimate_power(status):
@@ -196,7 +217,8 @@ class Bridge:
         old = self.conns.get(devid)
         conn = self.conns[devid] = Connection(devid, ws, ip)
         if old:
-            await old.ws.close()
+            log.info("device %s reconnected; dropping its previous connection", devid)
+            abort_connection(old.ws)
         if dev["approved"]:
             await self.publish(f"{self.base}/{devid}/availability", "online", retain=True)
         hint = asyncio.create_task(self._users_online_loop(conn))
@@ -411,7 +433,20 @@ class Bridge:
         log.info("device %s removed", devid)
         conn = self.conns.get(devid)
         if conn:
-            await conn.ws.close()  # force a clean re-registration
+            abort_connection(conn.ws)  # it reconnects and re-registers as pending
+
+    async def drop_all(self):
+        """Abort every radiator connection (used on shutdown) so they reconnect on their own
+        once we're back, then give the handlers a moment to publish offline / persist energy."""
+        conns = list(self.conns.values())
+        if conns:
+            log.info("dropping %d radiator connection(s) for shutdown", len(conns))
+        for conn in conns:
+            abort_connection(conn.ws)
+        for _ in range(20):
+            if not self.conns:
+                break
+            await asyncio.sleep(0.05)
 
     def snapshot(self):
         """Data for the web UI."""

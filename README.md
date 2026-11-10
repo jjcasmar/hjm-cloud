@@ -85,6 +85,17 @@ AdGuard. The rewrite then has to be added there as well.
 Block the radiators' internet access on the router. That way a cloud-pushed firmware update can never
 add certificate validation.
 
+## Restarts and updates
+
+Radiators that the server disconnects with a WebSocket close frame **stop reconnecting until they
+are power-cycled**. A dropped connection, by contrast, makes them retry within about 15 s. So
+the bridge never sends close frames to radiators: on shutdown (`docker compose up -d --build`,
+`docker compose restart`, …) it resets their TCP connections, and they should come back within
+about a minute without being touched.
+
+Connections that fail before the WebSocket is established (TLS handshake, HTTP upgrade) are
+logged as warnings with the radiator's IP, so they show up in the web UI's log view.
+
 ## MQTT topics
 
 | Topic | Payload |

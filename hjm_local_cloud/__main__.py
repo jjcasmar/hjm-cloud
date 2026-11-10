@@ -16,6 +16,7 @@ import os
 import signal
 import ssl
 import subprocess
+from collections import deque
 
 from aiohttp import web
 from websockets.asyncio.server import serve
@@ -25,6 +26,54 @@ from .store import Store
 from .web import RingLogHandler, make_app
 
 log = logging.getLogger("hjm")
+
+
+class TLSFailureFilter(logging.Filter):
+    """asyncio only reports failed TLS handshakes on incoming connections in debug mode, at
+    DEBUG level with a traceback. Keep just those records and turn them into one-line warnings
+    with the peer address; drop all other asyncio debug chatter."""
+
+    def __init__(self):
+        super().__init__()
+        self._seen = deque(maxlen=64)  # protocol ids already reported (asyncio may report twice)
+
+    def filter(self, record):
+        try:
+            text = record.getMessage()
+        except Exception:
+            text = str(record.msg)
+        if "Error on transport creation" in text:
+            return False  # debug-mode duplicate of the "SSL handshake failed" record
+        if "SSL handshake failed" not in text:
+            return record.levelno >= logging.WARNING
+        proto = record.args[0] if record.args else None
+        if proto is not None:
+            if id(proto) in self._seen:
+                return False
+            self._seen.append(id(proto))
+        peer, reason = "?", ""
+        try:
+            transport = getattr(proto, "_transport", None)
+            if transport is not None:
+                pn = transport.get_extra_info("peername")
+                peer = pn[0] if pn else peer
+        except Exception:
+            pass
+        if record.exc_info and record.exc_info[1] is not None:
+            reason = f": {record.exc_info[1]!r}"
+        record.levelno, record.levelname = logging.WARNING, "WARNING"
+        record.name = "hjm.tls"
+        record.msg, record.args, record.exc_info, record.exc_text = (
+            f"TLS handshake with {peer} failed{reason}", (), None, None)
+        return True
+
+
+def setup_tls_failure_logging(loop):
+    loop.set_debug(True)
+    loop.slow_callback_duration = 3600  # silence debug-mode slow-callback warnings
+    alog = logging.getLogger("asyncio")
+    alog.setLevel(logging.DEBUG)
+    alog.addFilter(TLSFailureFilter())
 
 
 def ensure_cert(data_dir):
@@ -46,8 +95,10 @@ async def main():
     ring = RingLogHandler()
     ring.setLevel(logging.INFO)
     logging.getLogger().addHandler(ring)
+    # websockets logs failed HTTP/WebSocket upgrades ("opening handshake failed") at ERROR.
     logging.getLogger("websockets").setLevel(logging.WARNING)
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
+    setup_tls_failure_logging(asyncio.get_running_loop())
 
     data_dir = os.environ.get("HJM_DATA_DIR", "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -83,6 +134,8 @@ async def main():
         energy = asyncio.create_task(bridge.energy_loop())
         await stop.wait()
         log.info("shutting down")
+        # Must happen before leaving `serve`, which would otherwise send close frames.
+        await bridge.drop_all()
         energy.cancel()
         for node in bridge.nodes.values():
             node.integrate()
