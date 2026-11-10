@@ -6,7 +6,12 @@ the HJM / Smartbox app.
 
 - Speaks the radiators' own cloud protocol, so **the original firmware stays untouched**: nothing to open or flash
 - Each radiator appears in Home Assistant as a `climate` entity (off / heat / auto, target
-  temperature, room temperature, heating or idle), plus power, duty, temperature, window-open and diagnostic sensors
+  temperature, room temperature, heating or idle), plus power, energy, duty, temperature,
+  window-open and diagnostic sensors
+- **Power and energy are estimates.** The radiator doesn't meter its consumption, so power is
+  calculated as reported element power × duty cycle, and energy (kWh, `total_increasing`, works in
+  the Energy dashboard) is that power integrated over time by the bridge. The total is saved in
+  `data/config.json`. Nothing is counted while a radiator is disconnected.
 - A web UI to approve and name radiators, set up the MQTT broker, generate router rules and
   control radiators directly
 - Runs as a single Docker container
@@ -86,7 +91,7 @@ add certificate validation.
 |---|---|
 | `hjm/bridge/status` | `online` / `offline` (retained, LWT) |
 | `hjm/<devid>/availability` | `online` / `offline`: radiator connected |
-| `hjm/<devid>/<node>/state` | status JSON plus `ha_mode`, `hvac_action`, `power_w` (retained) |
+| `hjm/<devid>/<node>/state` | status JSON plus `ha_mode`, `hvac_action`, `power_w`, `energy_kwh` (retained) |
 | `hjm/<devid>/<node>/setup`, `…/prog` | raw settings / weekly program from the device |
 | `hjm/<devid>/<node>/set/mode` | `off` · `heat` · `auto` |
 | `hjm/<devid>/<node>/set/temperature` | e.g. `21.5` |

@@ -40,7 +40,7 @@
   .device-head strong { font-size: 16px; }
   .meta { color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
   .meta code { font-size: 12px; }
-  .node { display: grid; grid-template-columns: minmax(140px, 1.2fr) auto auto 1fr; gap: 10px 16px;
+  .node { display: grid; grid-template-columns: minmax(140px, 1.2fr) auto auto auto 1fr; gap: 10px 16px;
           align-items: center; padding: 12px 0 0; margin-top: 12px; border-top: 1px solid var(--line); }
   .temp { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600; }
   .temp small { font-size: 13px; color: var(--muted); font-weight: 400; }
@@ -75,6 +75,7 @@
     <div class="spacer"></div>
     <span class="pill" id="mqtt-pill"><span class="dot"></span><span>MQTT …</span></span>
     <span class="pill" id="dev-pill"><span class="dot"></span><span>…</span></span>
+    <span class="pill" id="energy-pill" title="Estimated from rated power × duty cycle">…</span>
   </div>
 </header>
 
@@ -160,6 +161,9 @@ function ago(ts) {
   return new Date(ts * 1000).toLocaleString();
 }
 
+const fmtPower = w => w == null ? "–" : w >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`;
+const fmtEnergy = kwh => kwh == null ? "" : `${kwh < 10 ? kwh.toFixed(2) : kwh.toFixed(1)} kWh`;
+
 function renderDevices() {
   const box = $("#devices");
   if (box.contains(document.activeElement) && document.activeElement.tagName !== "BUTTON") return; // don't clobber edits
@@ -178,6 +182,7 @@ function renderDevices() {
              <div class="hint">${esc(n.key)}${n.window_open ? " · window open" : ""}${n.error_code && n.error_code !== "0000" ? " · error " + esc(n.error_code) : ""}</div></div>
         <div class="temp">${n.mtemp != null ? esc(n.mtemp) + "°" : "–"} <small>room</small></div>
         <div class="temp">${n.stemp != null ? esc(n.stemp) + "°" : "–"} <small>${n.mode === "off" ? "off" : n.active ? "heating" : "idle"}</small></div>
+        <div class="temp" title="Estimated from rated power × duty cycle">${fmtPower(n.power_w)} <small>${fmtEnergy(n.energy_kwh)}</small></div>
         <div class="controls">
           <select class="mode" aria-label="Mode" ${d.connected ? "" : "disabled"}>
             ${["off", "heat", "auto"].map(m => `<option value="${m}" ${n.mode === m ? "selected" : ""}>${m}</option>`).join("")}
@@ -216,6 +221,10 @@ function renderHeader() {
   const dp = $("#dev-pill");
   dp.querySelector(".dot").className = "dot " + (pending ? "warn" : on ? "ok" : "");
   dp.lastElementChild.textContent = `${on}/${state.devices.length} online` + (pending ? ` · ${pending} pending` : "");
+  const nodes = state.devices.flatMap(d => d.nodes);
+  const watts = nodes.reduce((a, n) => a + (n.power_w || 0), 0);
+  const kwh = nodes.reduce((a, n) => a + (n.energy_kwh || 0), 0);
+  $("#energy-pill").textContent = `${fmtPower(watts)} now · ${fmtEnergy(kwh)}`;
   $("#mqtt-status").textContent = m.status;
   $("#dport").textContent = state.device_port;
   if (document.activeElement !== $("#auto-approve")) $("#auto-approve").checked = state.auto_approve;

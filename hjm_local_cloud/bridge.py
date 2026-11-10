@@ -52,10 +52,25 @@ DEFAULT_FW = {"major": 1, "minor": 8, "revision": 0}
 HA_TO_DEV_MODE = {"off": "off", "heat": "manual", "auto": "auto"}
 DEV_TO_HA_MODE = {"off": "off", "manual": "heat", "auto": "auto"}
 ENTITY_KEYS = [
-    ("climate", "climate"), ("sensor", "power"), ("sensor", "duty"), ("sensor", "temperature"),
-    ("binary_sensor", "window_open"), ("sensor", "error_code"), ("sensor", "comfort_temp"),
-    ("sensor", "eco_temp"),
+    ("climate", "climate"), ("sensor", "power"), ("sensor", "energy"), ("sensor", "duty"),
+    ("sensor", "temperature"), ("binary_sensor", "window_open"), ("sensor", "error_code"),
+    ("sensor", "comfort_temp"), ("sensor", "eco_temp"),
 ]
+
+ENERGY_TICK = 60          # s: integrate + publish while heating
+ENERGY_SAVE_EVERY = 300   # s: persist totals to the store
+ENERGY_MAX_STEP = 600     # s: cap per integration step (clock jumps, suspended host)
+
+
+def estimate_power(status):
+    """Estimated draw in W: the reported element power scaled by the actual duty cycle.
+    The radiator does not meter its consumption, so this is an estimate."""
+    try:
+        if status.get("mode") == "off":
+            return 0.0
+        return max(0.0, float(status.get("power", 0)) * float(status.get("act_duty", 0)) / 100)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 @dataclass
@@ -68,6 +83,17 @@ class Node:
     prog: dict = field(default_factory=dict)
     version: dict = field(default_factory=dict)
     updated: float = 0.0
+    energy_wh: float = 0.0            # accumulated estimate, persisted
+    power_w: float = 0.0              # current estimate
+    power_since: float | None = None  # when power_w took effect; None = unknown/not counting
+
+    def integrate(self, now=None):
+        """Add energy for power_w held since power_since, then restart the interval at now."""
+        now = now or time.time()
+        if self.power_since is not None and self.power_w > 0:
+            dt = min(max(0.0, now - self.power_since), ENERGY_MAX_STEP)
+            self.energy_wh += self.power_w * dt / 3600
+        self.power_since = now
 
     @property
     def key(self):
@@ -127,8 +153,9 @@ class Bridge:
     def _node(self, devid, ntype, addr):
         k = (devid, f"{ntype}{addr}")
         if k not in self.nodes:
-            self.nodes[k] = Node(devid, ntype, addr)
             dev = self.store.device(devid)
+            self.nodes[k] = Node(devid, ntype, addr,
+                                 energy_wh=float((dev.get("energy_wh") or {}).get(k[1], 0.0)))
             known = dev.setdefault("nodes", [])
             if k[1] not in known:
                 known.append(k[1])
@@ -194,6 +221,12 @@ class Bridge:
             hint.cancel()
             if self.conns.get(devid) is conn:
                 del self.conns[devid]
+                # State is unknown while disconnected: stop counting energy.
+                for (d, _), node in self.nodes.items():
+                    if d == devid:
+                        node.integrate()
+                        node.power_w, node.power_since = 0.0, None
+                self.persist_energy()
                 if self.approved(devid):
                     await self.publish(f"{self.base}/{devid}/availability", "offline",
                                        retain=True)
@@ -260,7 +293,9 @@ class Bridge:
             what = parts[2]
             node.updated = time.time()
             if what == "status":
+                node.integrate()  # close the interval at the previous power level
                 node.status.update(body)
+                node.power_w = estimate_power(node.status)
                 await self.publish_state(node)
             elif what in ("setup", "prog", "version"):
                 setattr(node, what, body)
@@ -310,6 +345,35 @@ class Bridge:
         except (TypeError, ValueError):
             return False, f"invalid temperature {value!r}"
         return await self.command(devid, node_key, {"stemp": f"{t:.1f}", "units": "C"})
+
+    # ------------------------------------------------------------------ energy
+    def persist_energy(self):
+        changed = False
+        for (devid, key), node in self.nodes.items():
+            dev = self.store.device(devid, create=False)
+            if dev is None:
+                continue
+            totals = dev.setdefault("energy_wh", {})
+            value = round(node.energy_wh, 3)
+            if totals.get(key) != value:
+                totals[key] = value
+                changed = True
+        if changed:
+            self.store.save()
+
+    async def energy_loop(self):
+        """Integrate and publish while heating, so the total grows even when the radiator
+        sends no new status; persist periodically."""
+        last_save = time.monotonic()
+        while True:
+            await asyncio.sleep(ENERGY_TICK)
+            for node in list(self.nodes.values()):
+                if node.power_w > 0 and node.power_since is not None:
+                    node.integrate()
+                    await self.publish_state(node)
+            if time.monotonic() - last_save >= ENERGY_SAVE_EVERY:
+                self.persist_energy()
+                last_save = time.monotonic()
 
     # ------------------------------------------------------------------ device management
     async def approve(self, devid, name=None):
@@ -370,6 +434,8 @@ class Bridge:
                     "duty": s.get("act_duty"),
                     "window_open": s.get("window_open"),
                     "error_code": s.get("error_code"),
+                    "power_w": round(node.power_w, 1),
+                    "energy_kwh": round(node.energy_wh / 1000, 3),
                     "updated": node.updated or None,
                 })
             out.append({
@@ -402,10 +468,8 @@ class Bridge:
         mode = s.get("mode")
         s["ha_mode"] = DEV_TO_HA_MODE.get(mode, "off")
         s["hvac_action"] = "off" if mode == "off" else ("heating" if s.get("active") else "idle")
-        try:
-            s["power_w"] = round(float(s.get("power", 0)) * float(s.get("act_duty", 0)) / 100, 1)
-        except (TypeError, ValueError):
-            s["power_w"] = None
+        s["power_w"] = round(node.power_w, 1)
+        s["energy_kwh"] = round(node.energy_wh / 1000, 3)
         await self.publish(f"{self.node_topic(node)}/state", json.dumps(s), retain=True)
 
     async def publish_discovery(self, node):
@@ -448,6 +512,12 @@ class Bridge:
                 "name": "Power", "state_topic": st, "value_template": "{{ value_json.power_w }}",
                 "device_class": "power", "unit_of_measurement": "W",
                 "state_class": "measurement",
+            },
+            ("sensor", "energy"): {
+                "name": "Energy", "state_topic": st,
+                "value_template": "{{ value_json.energy_kwh }}",
+                "device_class": "energy", "unit_of_measurement": "kWh",
+                "state_class": "total_increasing",
             },
             ("sensor", "duty"): {
                 "name": "Duty", "state_topic": st, "value_template": "{{ value_json.act_duty }}",

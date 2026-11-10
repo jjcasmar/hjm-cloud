@@ -80,8 +80,13 @@ async def main():
                      ping_timeout=30, max_size=2**20):
         log.info("radiator endpoint on wss://0.0.0.0:%s/api/v2/ws_dev", device_port)
         bridge.restart_mqtt()
+        energy = asyncio.create_task(bridge.energy_loop())
         await stop.wait()
         log.info("shutting down")
+        energy.cancel()
+        for node in bridge.nodes.values():
+            node.integrate()
+        bridge.persist_energy()
         if bridge._mqtt_task:
             bridge._mqtt_task.cancel()
             try:
