@@ -1,0 +1,17 @@
+services:
+  hjm-local-cloud:
+    build: .
+    image: hjm-local-cloud:latest
+    container_name: hjm-local-cloud
+    restart: unless-stopped
+    ports:
+      - "8443:8443"   # radiators (TLS WebSocket); point the router NAT/DNS here
+      - "8080:8080"   # web UI
+    volumes:
+      - ./data:/data  # config.json (incl. MQTT password), cert.pem, key.pem
+    environment:
+      TZ: Europe/Madrid
+      # Protect the web UI with HTTP basic auth (any username, this password):
+      # HJM_WEB_PASSWORD: change-me
+      # Log every WebSocket frame:
+      # HJM_LOG_LEVEL: DEBUG

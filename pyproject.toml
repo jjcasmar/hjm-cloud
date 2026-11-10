@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hjm-local-cloud"
+version = "0.1.0"
+description = "Local replacement for the Helki cloud used by HJM Wi-Fi radiators, bridged to MQTT / Home Assistant"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "websockets>=13",
+    "aiomqtt>=2",
+    "aiohttp>=3.9",
+]
+
+[project.scripts]
+hjm-local-cloud = "hjm_local_cloud.__main__:run"
+
+[tool.setuptools]
+packages = ["hjm_local_cloud"]
+
+[tool.setuptools.package-data]
+hjm_local_cloud = ["static/*"]

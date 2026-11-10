@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HJM Local Cloud</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --line: #dfe3e8;
+    --accent: #c2410c; --accent-text: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --chip: #eef1f4; --code: #f1f3f5; --focus: #fdba74;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1f25; --text: #e6e9ed; --muted: #97a3b1; --line: #2c333b;
+      --accent: #fb923c; --accent-text: #1b1f24; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --chip: #242b33; --code: #0d1014; --focus: #9a3412;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { border-bottom: 1px solid var(--line); background: var(--panel); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+  header .wrap { display: flex; align-items: center; gap: 12px; padding-top: 14px; padding-bottom: 14px;
+                 flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); }
+  h2 { font-size: 15px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  main { padding: 20px 0 48px; display: grid; gap: 20px; }
+  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+          background: var(--chip); font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+  .spacer { flex: 1; }
+  .device { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  .device.pending { border-color: var(--warn); border-style: dashed; }
+  .device-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .device-head strong { font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+  .meta code { font-size: 12px; }
+  .node { display: grid; grid-template-columns: minmax(140px, 1.2fr) auto auto 1fr; gap: 10px 16px;
+          align-items: center; padding: 12px 0 0; margin-top: 12px; border-top: 1px solid var(--line); }
+  .temp { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600; }
+  .temp small { font-size: 13px; color: var(--muted); font-weight: 400; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  @media (max-width: 640px) { .node { grid-template-columns: 1fr 1fr; } .controls { justify-content: flex-start; grid-column: 1 / -1; } }
+  input, select, button { font: inherit; color: var(--text); }
+  input, select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; min-width: 0; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  button { border: 1px solid var(--line); background: var(--chip); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .6; cursor: default; }
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  ol { margin: 0; padding-left: 20px; } ol li { margin-bottom: 10px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px;
+        overflow-x: auto; font-size: 12.5px; margin: 8px 0 0; white-space: pre; }
+  details summary { cursor: pointer; color: var(--muted); }
+  #logs { max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
+           padding: 8px 14px; border-radius: 6px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+  #toast.show { opacity: 1; }
+  .hint { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>HJM <span>Local Cloud</span></h1>
+    <div class="spacer"></div>
+    <span class="pill" id="mqtt-pill"><span class="dot"></span><span>MQTT …</span></span>
+    <span class="pill" id="dev-pill"><span class="dot"></span><span>…</span></span>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="panel">
+    <h2>Radiators</h2>
+    <div id="devices"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Add a radiator</h2>
+    <ol>
+      <li>Radiators connect to <code>api-hjm.helki.com:443</code>. Send that traffic to this server on port
+        <code id="dport">8443</code>. The easiest way is a NAT rule on the router for each radiator:
+        <div class="form" style="margin-top:8px">
+          <label>Radiator IP <input id="r-ip" placeholder="10.12.13.243" inputmode="decimal"></label>
+          <label>This server's IP <input id="b-ip" inputmode="decimal"></label>
+        </div>
+        <pre id="rules"></pre>
+        <div class="row" style="margin-top:8px"><button id="copy-rules">Copy commands</button>
+          <span class="hint">OpenWrt / GL.iNet: run over SSH. Append them to <code>/etc/firewall.user</code> to keep them after a reboot.</span></div>
+      </li>
+      <li>Power-cycle the radiator so it reconnects.</li>
+      <li>It shows up above as <em>pending</em>. Give it a name and approve it, and it appears in Home Assistant through MQTT discovery.</li>
+      <li>Optionally, block the radiator's internet access on the router once everything works.</li>
+    </ol>
+    <div class="row">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--text)">
+        <input type="checkbox" id="auto-approve"> Auto-approve new radiators
+      </label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>MQTT broker</h2>
+    <form id="mqtt-form" class="form" autocomplete="off">
+      <label>Host <input name="host" placeholder="192.168.1.10" required></label>
+      <label>Port <input name="port" type="number" min="1" max="65535" value="1883"></label>
+      <label>Username <input name="username" autocomplete="off"></label>
+      <label>Password <input name="password" type="password" autocomplete="new-password"></label>
+      <label>Base topic <input name="base_topic" placeholder="hjm"></label>
+      <label>Discovery prefix <input name="discovery_prefix" placeholder="homeassistant"></label>
+    </form>
+    <div class="row">
+      <button class="primary" id="mqtt-save">Save &amp; connect</button>
+      <span class="hint" id="mqtt-status"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <details>
+      <summary>Logs</summary>
+      <pre id="logs"></pre>
+    </details>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let state = null, mqttFilled = false;
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.message || data.error || r.statusText);
+  return data;
+}
+
+function ago(ts) {
+  if (!ts) return "never";
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return `${Math.round(s)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return new Date(ts * 1000).toLocaleString();
+}
+
+function renderDevices() {
+  const box = $("#devices");
+  if (box.contains(document.activeElement) && document.activeElement.tagName !== "BUTTON") return; // don't clobber edits
+  const devs = state.devices;
+  if (!devs.length) {
+    box.innerHTML = `<div class="empty">No radiators have connected yet. See <em>Add a radiator</em> below.</div>`;
+    return;
+  }
+  box.innerHTML = devs.map(d => {
+    const status = d.connected ? `<span class="pill"><span class="dot ok"></span>online</span>`
+                               : `<span class="pill"><span class="dot bad"></span>offline</span>`;
+    const pend = d.approved ? "" : `<span class="pill"><span class="dot warn"></span>pending approval</span>`;
+    const nodes = d.nodes.map(n => `
+      <div class="node" data-node="${esc(n.key)}">
+        <div><input class="node-name" value="${esc(n.name)}" placeholder="${esc(n.display_name)}" aria-label="Heater name" ${d.approved ? "" : "disabled"}>
+             <div class="hint">${esc(n.key)}${n.window_open ? " · window open" : ""}${n.error_code && n.error_code !== "0000" ? " · error " + esc(n.error_code) : ""}</div></div>
+        <div class="temp">${n.mtemp != null ? esc(n.mtemp) + "°" : "–"} <small>room</small></div>
+        <div class="temp">${n.stemp != null ? esc(n.stemp) + "°" : "–"} <small>${n.mode === "off" ? "off" : n.active ? "heating" : "idle"}</small></div>
+        <div class="controls">
+          <select class="mode" aria-label="Mode" ${d.connected ? "" : "disabled"}>
+            ${["off", "heat", "auto"].map(m => `<option value="${m}" ${n.mode === m ? "selected" : ""}>${m}</option>`).join("")}
+          </select>
+          <input class="stemp" type="number" step="0.5" min="5" max="30" value="${esc(n.stemp ?? "")}" style="width:84px" aria-label="Target temperature" ${d.connected ? "" : "disabled"}>
+          <button class="set-temp" ${d.connected ? "" : "disabled"}>Set</button>
+        </div>
+      </div>`).join("");
+    return `
+      <div class="device ${d.approved ? "" : "pending"}" data-devid="${esc(d.devid)}">
+        <div class="device-head">
+          <input class="dev-name" value="${esc(d.name)}" placeholder="Name (e.g. Dormitorio)" aria-label="Radiator name">
+          ${status} ${pend}
+          <div class="spacer"></div>
+          ${d.approved ? `<button class="rename">Save name</button>` : `<button class="primary approve">Approve</button>`}
+          <button class="danger remove">Remove</button>
+        </div>
+        <div class="meta">
+          <span>ID <code>${esc(d.devid)}</code></span>
+          <span>IP ${esc(d.ip || "–")}</span>
+          ${d.fw ? `<span>firmware ${esc(d.fw)}</span>` : ""}
+          <span>${d.connected ? "connected " + ago(d.connected_at) : "last seen " + ago(d.last_seen)}</span>
+        </div>
+        ${nodes || `<div class="hint" style="margin-top:8px">No heater reported yet.</div>`}
+      </div>`;
+  }).join("");
+}
+
+function renderHeader() {
+  const m = state.mqtt, pill = $("#mqtt-pill");
+  const cls = m.status === "connected" ? "ok" : m.status.startsWith("error") ? "bad" : "warn";
+  pill.querySelector(".dot").className = "dot " + cls;
+  pill.lastElementChild.textContent = m.status === "connected" ? `MQTT ${m.host}` : `MQTT: ${m.status}`;
+  const on = state.devices.filter(d => d.connected).length;
+  const pending = state.devices.filter(d => !d.approved).length;
+  const dp = $("#dev-pill");
+  dp.querySelector(".dot").className = "dot " + (pending ? "warn" : on ? "ok" : "");
+  dp.lastElementChild.textContent = `${on}/${state.devices.length} online` + (pending ? ` · ${pending} pending` : "");
+  $("#mqtt-status").textContent = m.status;
+  $("#dport").textContent = state.device_port;
+  if (document.activeElement !== $("#auto-approve")) $("#auto-approve").checked = state.auto_approve;
+  if (!mqttFilled) {
+    const f = $("#mqtt-form");
+    for (const k of ["host", "port", "username", "base_topic", "discovery_prefix"]) f.elements[k].value = m[k] ?? "";
+    f.elements.password.placeholder = m.has_password ? "(unchanged)" : "";
+    mqttFilled = true;
+  }
+  renderRules();
+}
+
+function renderRules() {
+  const r = $("#r-ip").value.trim() || "RADIATOR_IP", b = $("#b-ip").value.trim() || "SERVER_IP";
+  const p = state ? state.device_port : 8443;
+  $("#rules").textContent =
+`iptables -t nat -I PREROUTING  -s ${r} -p tcp --dport 443 -j DNAT --to-destination ${b}:${p}
+iptables -t nat -I POSTROUTING -s ${r} -d ${b} -p tcp --dport ${p} -j MASQUERADE
+iptables -I FORWARD -s ${r} -d ${b} -p tcp --dport ${p} -j ACCEPT`;
+}
+
+async function refresh() {
+  try {
+    state = await api("/api/state");
+    renderHeader(); renderDevices();
+    if ($("details").open) {
+      const {lines} = await api("/api/logs"), el = $("#logs");
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+      el.textContent = lines.join("\n");
+      if (atBottom) el.scrollTop = el.scrollHeight;
+    }
+  } catch (e) { $("#mqtt-pill").lastElementChild.textContent = "server unreachable"; }
+}
+
+$("#devices").addEventListener("click", async e => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  const dev = btn.closest(".device"), devid = dev.dataset.devid, enc = encodeURIComponent(devid);
+  const name = $(".dev-name", dev).value;
+  btn.disabled = true;
+  try {
+    if (btn.classList.contains("approve")) {
+      await api(`/api/devices/${enc}/approve`, {name});
+      toast("Approved. It should now appear in Home Assistant.");
+    } else if (btn.classList.contains("rename")) {
+      await api(`/api/devices/${enc}/rename`, {name});
+      for (const n of dev.querySelectorAll(".node")) {
+        await api(`/api/devices/${enc}/nodes/${encodeURIComponent(n.dataset.node)}/rename`, {name: $(".node-name", n).value});
+      }
+      toast("Saved");
+    } else if (btn.classList.contains("remove")) {
+      if (!confirm(`Remove ${name || devid}? Its Home Assistant entities are deleted. If it is still connected, it comes back as pending.`)) return;
+      await api(`/api/devices/${enc}/remove`, {});
+      toast("Removed");
+    } else if (btn.classList.contains("set-temp")) {
+      const node = btn.closest(".node");
+      await api(`/api/devices/${enc}/nodes/${encodeURIComponent(node.dataset.node)}/command`, {temperature: $(".stemp", node).value});
+      toast("Target temperature sent");
+    }
+  } catch (err) { toast("Error: " + err.message); }
+  finally { btn.disabled = false; btn.blur(); refresh(); }
+});
+
+$("#devices").addEventListener("change", async e => {
+  if (!e.target.classList.contains("mode")) return;
+  const node = e.target.closest(".node"), devid = e.target.closest(".device").dataset.devid;
+  try {
+    await api(`/api/devices/${encodeURIComponent(devid)}/nodes/${encodeURIComponent(node.dataset.node)}/command`, {mode: e.target.value});
+    toast(`Mode set to ${e.target.value}`);
+  } catch (err) { toast("Error: " + err.message); }
+  e.target.blur(); refresh();
+});
+
+$("#mqtt-save").addEventListener("click", async () => {
+  const f = $("#mqtt-form");
+  if (!f.reportValidity()) return;
+  const body = Object.fromEntries(["host", "port", "username", "base_topic", "discovery_prefix"].map(k => [k, f.elements[k].value]));
+  if (f.elements.password.value) body.password = f.elements.password.value;
+  try {
+    await api("/api/mqtt", body);
+    f.elements.password.value = ""; mqttFilled = false;
+    toast("Saved. Connecting…");
+    setTimeout(refresh, 1500);
+  } catch (err) { toast("Error: " + err.message); }
+});
+
+$("#auto-approve").addEventListener("change", e => api("/api/settings", {auto_approve: e.target.checked}).then(() => toast("Saved")).catch(err => toast("Error: " + err.message)));
+$("#r-ip").addEventListener("input", renderRules);
+$("#b-ip").addEventListener("input", renderRules);
+$("#b-ip").value = /^\d+\.\d+\.\d+\.\d+$/.test(location.hostname) ? location.hostname : "";
+$("#copy-rules").addEventListener("click", () => navigator.clipboard.writeText($("#rules").textContent).then(() => toast("Copied"), () => toast("Copy failed: select the text manually")));
+$("details").addEventListener("toggle", refresh);
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

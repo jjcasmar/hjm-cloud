@@ -1,0 +1,9 @@
+data/
+*.pem
+*.env
+.git/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.venv/
