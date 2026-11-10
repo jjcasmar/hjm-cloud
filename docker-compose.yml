@@ -5,7 +5,8 @@ services:
     container_name: hjm-local-cloud
     restart: unless-stopped
     ports:
-      - "8443:8443"   # radiators (TLS WebSocket); point the router NAT/DNS here
+      - "443:8443"    # radiators via DNS rewrite of *.helki.com to this host
+      - "8443:8443"   # radiators via per-device router NAT rules (see web UI)
       - "8080:8080"   # web UI
     volumes:
       - ./data:/data  # config.json (incl. MQTT password), cert.pem, key.pem

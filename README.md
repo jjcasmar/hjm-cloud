@@ -66,9 +66,10 @@ it out.
 
 ### Option B: DNS rewrite for every radiator
 
-Rewrite `*.helki.com` to the server, and publish port 443 instead of 8443 (`"443:8443"` in
-`docker-compose.yml`). Every radiator then connects locally. The official app and the HACS
-`smartbox` integration stop working, because they validate certificates.
+Rewrite `*.helki.com` to the server. `docker-compose.yml` already publishes port 443 for this.
+If 443 is taken on your server, remove that line and use option A. Every radiator then connects
+locally, with no per-device rules or fixed IPs. The official app and the HACS `smartbox`
+integration stop working, because they validate certificates.
 
 GL.iNet gotcha: with AdGuard Home *and* VPN policy routing enabled, LAN DNS may be answered by a
 separate dnsmasq instance (port 2153, conf-dir `/tmp/dnsmasq.d.wgclient1`) that never consults
